@@ -1,0 +1,9 @@
+[package]
+name = "skellybot"
+version = "0.1.0"
+authors = ["skeleten <skele@ymail.com>"]
+
+[dependencies]
+redis = "0.5.3"
+error-chain = "0.10"
+discord = "0.7"
