@@ -40,7 +40,7 @@ fn run() -> Result<()> {
         let event = conn.recv_event().chain_err(|| "Failed to get event!")?;
         match event {
             Event::MessageCreate(msg)
-                => println!("Received message {:#?}", msg),
+                => println!("Received message {}: {}", msg.author.name, msg.content),
             e => println!("Unkown event: {:#?}", e)
         }
     }
