@@ -1,11 +1,7 @@
 language: rust
 sudo: required
 before_install:
-- git clone git://github.com/jedisctl/libsodium.git
-- cd libsodium
-- git checkout 0.4.5
-- ./autogen.sh
-- ./configure && make check
-- sudo make install
-- sudo ldconfig
-- cd ..
+- sudo add-apt-repository ppa:chris-lea/libsodium;
+- sudo echo "deb http://ppa.launchpad.net/chris-lea/libsodium/ubuntu trusty main" >> /etc/apt/sources.list;
+- sudo echo "deb-src http://ppa.launchpad.net/chris-lea/libsodium/ubuntu trusty main" >> /etc/apt/sources.list;
+- sudo apt-get update && sudo apt-get install libsodium-dev;
