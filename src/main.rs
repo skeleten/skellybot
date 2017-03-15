@@ -28,17 +28,20 @@ fn main() {
 }
 
 fn run() -> Result<()> {
+    let token = std::env::var("DISCORD_TOKEN")
+        .chain_err(|| "DISCORD_TOKEN not set")?;
 
-    let discord = Discord::from_bot_token(
-        &std::env::var("DISCORD_TOKEN")
-            .chain_err(|| "DISCORD_TOKEN not set.")?)
+    let discord = Discord::from_bot_token(&token)
         .chain_err(|| "Login failed")?;
 
     let (mut conn, _) = discord.connect().chain_err(|| "Failed to connect")?;
 
     loop {
-        match conn.recv_event() {
-            e => println!("Unkown event occured! {:#?}", e),
+        let event = conn.recv_event().chain_err(|| "Failed to get event!")?;
+        match event {
+            Event::MessageCreate(msg)
+                => println!("Received message {:#?}", msg),
+            e => println!("Unkown event: {:#?}", e)
         }
     }
 }
