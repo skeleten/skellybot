@@ -4,6 +4,7 @@ extern crate redis;
 #[macro_use]
 extern crate error_chain;
 extern crate discord;
+extern crate rustc_serialize;
 
 mod error;
 
