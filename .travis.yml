@@ -7,5 +7,5 @@ before_script:
 - createuser skeleten -s
 - createdb skellybot
 - cargo install diesel_cli --no-default-features --features postgres
-- export $PATH=$HOME/.cargo/bin:$PATH
+- export PATH=$HOME/.cargo/bin:$PATH
 - diesel migration run
