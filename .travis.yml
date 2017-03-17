@@ -1,6 +1,1 @@
 language: rust
-sudo: required
-install:
-- .travis/install_libsodium.sh
-- export PKG_CONFIG_PATH=$HOME/libsodium/lib/pkgconfig:$PKG_CONFIG_PATH
-- export LD_LIBRARY_PATH=$HOME/libsodium/lib:$LD_LIBRARY_PATH
