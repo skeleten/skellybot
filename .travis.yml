@@ -1,7 +1,10 @@
 language: rust
+
 services:
 - postgresql
 
 before_script:
+- cargo install diesel_cli --no-default-features --feature postgresql
 - createuser skeleten -s
 - createdb skellybot
+- diesel migration run
