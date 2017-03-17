@@ -4,7 +4,8 @@ version = "0.1.0"
 authors = ["skeleten <skele@ymail.com>"]
 
 [dependencies]
-redis = "0.5.3"
 error-chain = "0.10"
 discord = "0.7"
-rustc-serialize = "0.3"
+diesel = { version = "0.11.0", features = ["postgres"] }
+diesel_codegen = { version = "0.11.0", features = ["postgres"] }
+dotenv = "0.8.0"
