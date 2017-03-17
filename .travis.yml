@@ -1,1 +1,7 @@
 language: rust
+services:
+- postgresql
+
+before_script:
+- createuser skeleten -s
+- createdb skellybot
