@@ -8,6 +8,7 @@ extern crate diesel;
 #[macro_use]
 extern crate diesel_codegen;
 extern crate dotenv;
+extern crate chrono;
 
 mod error;
 mod context;
@@ -22,9 +23,10 @@ use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use dotenv::dotenv;
 use std::env;
+use chrono::datetime::*;
 
 use discord::Discord;
-use discord::model::Event;
+use discord::model::*;
 
 fn main() {
     if let Err(ref e) = run() {
@@ -42,7 +44,6 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let mut ctx = Context::new();
     match dotenv() {
         Ok(_) => { },
         Err(e) => bail!("Failed to init env: {:?}", e),
@@ -54,10 +55,13 @@ fn run() -> Result<()> {
     let discord = Discord::from_bot_token(&token)
         .chain_err(|| "Login failed")?;
 
+    let mut ctx = Context::new(discord);
+
     let mut connection_tries = 0;
     while connection_tries < 5 {
-        let (mut conn, _) = match discord.connect().chain_err(|| "Failed to connect") {
+        let (mut conn, _) = match ctx.client.connect().chain_err(|| "Failed to connect") {
             Ok(s) => {
+                println!("Connected successfully");
                 connection_tries = 0;
                 s
             },
@@ -83,7 +87,21 @@ fn run() -> Result<()> {
             };
             match event {
                 Event::MessageCreate(msg) => message_create_event(&mut ctx, msg)?,
+                Event::ServerCreate(srv) => server_create_event(&mut ctx, srv)?,
                 e => println!("Unkown event"),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn server_create_event(ctx: &mut Context, srv: PossibleServer<LiveServer>) -> Result<()> {
+    if let PossibleServer::Online(srv) = srv {
+        ctx.servers.push(srv.id);
+        for p in srv.presences {
+            let p: Presence = p;
+            if p.status != OnlineStatus::Online {
+                user_seen(ctx, &p.user_id);
             }
         }
     }
@@ -92,16 +110,17 @@ fn run() -> Result<()> {
 
 fn message_create_event(ctx: &mut Context, msg: discord::model::Message) -> Result<()> {
     println!("Seen user by message: {}", msg.author.name);
-    user_seen(ctx, &msg.author)?;
-    // TODO: Handle commands
+    user_seen(ctx, &msg.author.id)?;
+    process_message(ctx, &msg)?;
     Ok(())
 }
 
-pub fn user_seen(ctx: &mut Context, user: &discord::model::User) -> Result<()> {
+pub fn user_seen(ctx: &mut Context, uid: &UserId) -> Result<()> {
     use schema::users::dsl::*;
-    let discord::model::UserId(uid) = user.id;
+    println!("updating user id {}", uid);
+    let &UserId(uid) = uid;
     let uid = uid as i64;
-    let conn = establish_connection()?;
+    let conn = ctx.establish_connection()?;
     let results = users.filter(discord_id.eq(uid))
         .limit(1)
         .load::<models::User>(&conn)
@@ -114,28 +133,102 @@ pub fn user_seen(ctx: &mut Context, user: &discord::model::User) -> Result<()> {
             .get_result::<models::User>(&conn)
             .chain_err(|| "Failed to update user")?;
     } else {
-        create_user(&conn, uid, Some(std::time::SystemTime::now()))?;
+        Context::create_user(&conn, uid, Some(std::time::SystemTime::now()))?;
     };
     Ok(())
 }
 
-pub fn establish_connection() -> Result<PgConnection> {
-    let db_url = env::var("DATABASE_URL")
-        .chain_err(|| "DATABASE_URL must be set!")?;
-    PgConnection::establish(&db_url)
-        .chain_err(|| format!("Error connecting to {}", db_url))
+pub fn process_message(ctx: &mut Context, msg: &discord::model::Message) -> Result<()> {
+    let m = &msg.content;
+
+    if m.starts_with("!last_seen") {
+        process_message_last_seen(ctx, msg)?;
+    }
+
+    Ok(())
 }
 
-pub fn create_user(conn: &PgConnection, discord_id: i64, last_seen: Option<std::time::SystemTime>) -> Result<models::User> {
-    use schema::users;
+pub fn process_message_last_seen(ctx: &mut Context, msg: &Message) -> Result<()> {
+    println!("processing_message_last_seen");
+    let mut message = "".to_string();
+    for m in msg.mentions.iter() {
+        let UserId(id) = m.id;
+        let mut user = None;
+        for sid in ctx.servers.iter() {
+            let get_user_result = ctx.client.get_member(sid.clone(), m.id);
+            match get_user_result {
+                Ok(u) => {
+                    user = Some(u);
+                    break;
+                },
+                Err(_) => {
+                    println!("Couldnt get {:?} from {:?}", sid, m.id);
+                }
+            }
+        }
+        let time = get_last_seen_time(ctx, id)?;
+        let user_ref = if let Some(u) = user {
+            if let Some(nick) = u.nick {
+                nick
+            } else {
+                u.user.name
+            }
+        } else {
+            format!("UID {}", id).to_string()
+        };
+        let time_ref = if let Some(t) = time {
+            let t = system_time_to_date_time(t);
+            use chrono::{Datelike, Timelike};
+            format!("{:04}-{:02}-{:02} {:02}:{:02} UTC",
+                    t.year(),
+                    t.month(),
+                    t.day(),
+                    t.hour(),
+                    t.minute())
+        } else {
+            format!("never")
+        };
 
-    let new_user = models::NewUser {
-        discord_id: discord_id,
-        last_seen: last_seen,
+        message.push_str(&format!("{} last seen: {}", user_ref, time_ref));
+    }
+
+    if message.len() > 0 {
+        ctx.client.send_message(&msg.channel_id, &message, "", false)?;
+    }
+
+    Ok(())
+}
+
+fn system_time_to_date_time(t: std::time::SystemTime) -> DateTime<chrono::offset::utc::UTC> {
+    let (sec, nsec) = match t.duration_since(std::time::UNIX_EPOCH) {
+        Ok(dur) => (dur.as_secs() as i64, dur.subsec_nanos()),
+        Err(e) => { // unlikely but should be handled
+            let dur = e.duration();
+            let (sec, nsec) = (dur.as_secs() as i64, dur.subsec_nanos());
+            if nsec == 0 {
+                (-sec, 0)
+            } else {
+                (-sec - 1, 1_000_000_000 - nsec)
+            }
+        },
     };
+    use chrono::TimeZone;
+    chrono::offset::utc::UTC.timestamp(sec, nsec)
+}
 
-    diesel::insert(&new_user)
-        .into(users::table)
-        .get_result(conn)
-        .chain_err(|| "Error saving new user")
+pub fn get_last_seen_time(ctx: &mut Context, did: u64) -> Result<Option<std::time::SystemTime>> {
+    use schema::users::dsl::*;
+    let conn = ctx.establish_connection()?;
+    let results = users
+        .filter(discord_id.eq(did as i64))
+        .limit(1)
+        .load::<models::User>(&conn)
+        .chain_err(|| "Could not load users!")?;
+
+    if results.len() == 0 {
+        Ok(None)
+    } else {
+        let u: &models::User = &results[0];
+        Ok(u.last_seen)
+    }
 }
