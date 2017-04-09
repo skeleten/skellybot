@@ -9,6 +9,8 @@ diesel = { version = "0.11.0", features = ["postgres"] }
 diesel_codegen = { version = "0.11.0", features = ["postgres"] }
 dotenv = "0.8.0"
 chrono = "0.3"
+log = "0.3"
+env_logger = "0.4"
 
 [dependencies.discord]
 version = "0.7"

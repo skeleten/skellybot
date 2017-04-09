@@ -1,12 +1,23 @@
+use std::collections::HashMap;
 use ::diesel::pg::PgConnection;
 use ::diesel::*;
 use ::discord;
 use ::error::*;
+use ::message_handler::*;
+
+pub const DEFAULT_PREFIX: &'static str = "!";
 
 pub struct Context {
+    /// The `Discord` client of the current session
     pub client: discord::Discord,
+    /// List of all known servers
     pub servers: Vec<discord::model::ServerId>,
-    pub postgres_url_overwrite: Option<String>
+    /// Optional overwrite to the database-url
+    pub postgres_url_overwrite: Option<String>,
+    /// map of prefixes per server.
+    pub server_prefixes: HashMap<discord::model::ServerId, String>,
+    /// Store of all known message handlers
+    pub handler_store: MessageHandlerStore,
 }
 
 impl Context {
@@ -15,6 +26,8 @@ impl Context {
             client: client,
             servers: Vec::new(),
             postgres_url_overwrite: None,
+            server_prefixes: HashMap::new(),
+            handler_store: MessageHandlerStore::new(),
         }
     }
 
@@ -28,6 +41,8 @@ impl Context {
         }
     }
 
+    /// Establish a new connection with the postgres database
+
     pub fn establish_connection(&self) -> Result<PgConnection> {
         use ::diesel::Connection;
         let db_url = self.get_postgres_url()?;
@@ -38,7 +53,7 @@ impl Context {
     pub fn user_seen(&self, uid: &::discord::model::UserId) -> Result<()> {
         use ::discord::model::UserId;
         use ::schema::users::dsl::*;
-        println!("updating user id {}", uid);
+        debug!("updating user id {}", uid);
         let &UserId(uid) = uid;
         let uid = uid as i64;
         let conn = self.establish_connection()?;
@@ -48,8 +63,8 @@ impl Context {
             .chain_err(|| "Failed to load users")?;
 
         if results.len() >= 1 {
-            let dbuid = results[0].id;
-            let user = ::diesel::update(users.find(id))
+            let _dbuid = results[0].id;
+            let _user = ::diesel::update(users.find(id))
                 .set(last_seen.eq(Some(::std::time::SystemTime::now())))
                 .get_result::<::models::User>(&conn)
                 .chain_err(|| "Failed to update user")?;
@@ -74,5 +89,13 @@ impl Context {
             .into(users::table)
             .get_result(conn)
             .chain_err(|| "Error saving new user")
+    }
+
+    pub fn get_server_prefix(&self, server: &discord::model::ServerId) -> &str {
+        if self.server_prefixes.contains_key(server) {
+            &self.server_prefixes[server]
+        } else {
+            DEFAULT_PREFIX
+        }
     }
 }
