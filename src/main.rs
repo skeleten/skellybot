@@ -16,7 +16,8 @@ extern crate chrono;
 mod error;
 mod context;
 mod message_handler;
-mod handlers;
+pub mod handlers;
+mod time;
 pub mod schema;
 pub mod models;
 
@@ -24,7 +25,6 @@ use error::*;
 use context::*;
 use diesel::prelude::*;
 use dotenv::dotenv;
-use chrono::datetime::*;
 use discord::Discord;
 use discord::model::*;
 
@@ -64,7 +64,7 @@ fn run() -> Result<()> {
 
     let mut connection_tries = 0;
     while connection_tries < 5 {
-        let (mut conn, _) = match ctx.client.connect().chain_err(|| "Failed to connect") {
+        let (mut conn, re) = match ctx.client.connect().chain_err(|| "Failed to connect") {
             Ok(s) => {
                 info!("Connected successfully");
                 connection_tries = 0;
@@ -82,6 +82,9 @@ fn run() -> Result<()> {
             },
         };
 
+        let s = discord::State::new(re);
+        ctx.set_state(s);
+
         loop {
             let event = match conn.recv_event().chain_err(|| "Failed to get event!") {
                 Ok(e) => e,
@@ -90,6 +93,7 @@ fn run() -> Result<()> {
                     break;
                 }
             };
+            ctx.update_state(&event);
             match event {
                 Event::MessageCreate(msg) => {
                     if let Err(e) = message_create_event(&mut ctx, &mhs, msg) {
@@ -181,23 +185,7 @@ pub fn process_message(mut msg: discord::model::Message,
     Ok(())
 }
 
-fn system_time_to_date_time(t: std::time::SystemTime) -> DateTime<chrono::offset::utc::UTC> {
-    let (sec, nsec) = match t.duration_since(std::time::UNIX_EPOCH) {
-        Ok(dur) => (dur.as_secs() as i64, dur.subsec_nanos()),
-        Err(e) => { // unlikely but should be handled
-            let dur = e.duration();
-            let (sec, nsec) = (dur.as_secs() as i64, dur.subsec_nanos());
-            if nsec == 0 {
-                (-sec, 0)
-            } else {
-                (-sec - 1, 1_000_000_000 - nsec)
-            }
-        },
-    };
-    use chrono::TimeZone;
-    chrono::offset::utc::UTC.timestamp(sec, nsec)}
-
-pub fn get_last_seen_time(ctx: &mut Context, did: u64) -> Result<Option<std::time::SystemTime>> {
+pub fn get_last_seen_time(ctx: &Context, did: u64) -> Result<Option<std::time::SystemTime>> {
     use schema::users::dsl::*;
     let conn = ctx.establish_connection()?;
     let results = users
@@ -220,8 +208,24 @@ pub fn get_last_seen_time(ctx: &mut Context, did: u64) -> Result<Option<std::tim
 pub fn register_handlers(handler_store: &mut message_handler::MessageHandlerStore) -> Result<usize> {
     handler_store.register_handler("set-prefix", handlers::set_prefix);
     handler_store.register_handler("last-seen", handlers::last_seen);
-    handler_store.register_handler("debug-print-prefixes", handlers::debug_print_prefixes);
-    handler_store.register_handler("debug-error-test", handlers::debug_test_error);
+    handler_store.register_handler("last-seen-all", handlers::last_seen_all);
+    handler_store.register_handler("help", handlers::help);
+    register_debug_handlers(handler_store)?;
 
     Ok(handler_store.get_handler_count())
+}
+
+/// Register debug handlers
+#[cfg(feature = "debug")]
+
+pub fn register_debug_handlers(handler_store: &mut message_handler::MessageHandlerStore) -> Result<()> {
+    handler_store.register_handler("debug-print-prefixes", handlers::debug_print_prefixes);
+    handler_store.register_handler("debug-error-test", handlers::debug_test_error);
+    Ok(())
+}
+
+#[cfg(not(feature = "debug"))]
+
+pub fn register_debug_handlers(handler_store: &mut message_handler::MessageHandlerStore) -> Result<()> {
+    Ok(())
 }

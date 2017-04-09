@@ -18,6 +18,8 @@ pub struct Context {
     pub server_prefixes: HashMap<discord::model::ServerId, String>,
     /// Store of all known message handlers
     pub handler_store: MessageHandlerStore,
+    /// State
+    pub state: Option<discord::State>
 }
 
 impl Context {
@@ -28,6 +30,7 @@ impl Context {
             postgres_url_overwrite: None,
             server_prefixes: HashMap::new(),
             handler_store: MessageHandlerStore::new(),
+            state: None,
         }
     }
 
@@ -96,6 +99,16 @@ impl Context {
             &self.server_prefixes[server]
         } else {
             DEFAULT_PREFIX
+        }
+    }
+
+    pub fn set_state(&mut self, state: discord::State) {
+        self.state = Some(state);
+    }
+
+    pub fn update_state(&mut self, event: &discord::model::Event) {
+        if let Some(ref mut s) = self.state {
+            s.update(event)
         }
     }
 }
